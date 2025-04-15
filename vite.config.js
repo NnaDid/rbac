@@ -7,7 +7,8 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:8000/',
+        target: 'https://rbac-audit-sparkling-bush-3734.fly.dev/',
+        // target: 'http://localhost:8000/',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, '')
       }
