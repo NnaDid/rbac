@@ -1,19 +1,53 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom"; 
+import { useEffect, useState } from "react";
+import { Navigate, useNavigate } from "react-router-dom"; 
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { authService } from "../api/service";
 
 const SecurityDashboard = () => {
-  const navigate = useNavigate(); 
-  // Simulated logged-in user
-  const [loggedInUser, setLoggedInUser] = useState("security_team_01");
+  const navigate = useNavigate();
+  const [loggedInUser, setLoggedInUser] = useState("");
+  const [logs, setLogs] = useState([]);
 
-  const [logs, setLogs] = useState([
-    { id: 1, type: "LOGIN_SUCCESS", user: "john_doe", ip: "192.168.1.10", timestamp: "2025-03-07 10:00 AM" },
-    { id: 2, type: "FAILED_LOGIN", user: "unknown_user", ip: "203.0.113.45", timestamp: "2025-03-07 10:05 AM" },
-    { id: 3, type: "ROLE_CHANGED", user: "admin", action: "Changed role of mark_security to Admin", ip: "172.16.5.22", timestamp: "2025-03-07 10:10 AM" },
-    { id: 4, type: "UNAUTHORIZED_ACCESS", user: "hacker_123", ip: "185.220.101.7", timestamp: "2025-03-07 10:15 AM" },
-    { id: 5, type: "SUSPICIOUS_ACTIVITY", user: "jane_admin", action: "Multiple failed login attempts", ip: "198.51.100.34", timestamp: "2025-03-07 10:20 AM" }
-  ]);
+  useEffect(() => {
+
+    const fetchLogs = async () => {
+           // Get current user
+     const currentUser = authService.getCurrentUser();
+     if (!currentUser && !currentUser.username) return ; 
+    setLoggedInUser(currentUser.username);
+      try {
+        const logResponse = await authService.getLogs(); 
+        const transformedLogs = logResponse.map(log => ({
+          id: log.id,
+          type: log.event_type,
+          user: log.username,
+          ip: log.ip_address,
+          timestamp: formatTimestamp(log.timestamp),
+          action: log.description || "-",
+          user_id: log.user_id
+        }));
+        setLogs(transformedLogs);
+      } catch (error) {
+        console.error("Failed to fetch logs:", error);
+      }
+    };
+
+    fetchLogs();
+    
+   
+  }, [loggedInUser]);
+
+
+
+  // Format timestamp from ISO to more readable format
+  const formatTimestamp = (isoTimestamp) => {
+    try {
+      const date = new Date(isoTimestamp);
+      return date.toLocaleString();
+    } catch (e) {
+      return isoTimestamp;
+    }
+  };
 
   // Function to generate a random IP address for testing
   const generateRandomIP = () => {
@@ -22,19 +56,20 @@ const SecurityDashboard = () => {
 
   // Simulate adding a new log entry dynamically
   const addLog = () => {
-    const eventTypes = ["LOGIN_SUCCESS", "FAILED_LOGIN", "ROLE_CHANGED", "UNAUTHORIZED_ACCESS", "SUSPICIOUS_ACTIVITY"];
+    const eventTypes = ["LOGIN_SUCCESS", "FAILED_LOGIN", "ROLE_CHANGED", "UNAUTHORIZED_ACCESS", "SUSPICIOUS_ACTIVITY", "USER_CREATED", "MFA_ENABLED"];
     const randomEvent = eventTypes[Math.floor(Math.random() * eventTypes.length)];
+    
+    const newLog = {
+      id: logs.length > 0 ? Math.max(...logs.map(log => log.id)) + 1 : 1,
+      type: randomEvent,
+      user: "random_user",
+      ip: generateRandomIP(),
+      timestamp: new Date().toLocaleString(),
+      action: "Simulated event",
+      user_id: 999
+    };
 
-    setLogs([
-      ...logs,
-      { 
-        id: logs.length + 1, 
-        type: randomEvent, 
-        user: "random_user", 
-        ip: generateRandomIP(), 
-        timestamp: new Date().toLocaleString() 
-      }
-    ]);
+    setLogs([...logs, newLog]);
   };
 
   // Export logs as CSV
@@ -65,8 +100,9 @@ const SecurityDashboard = () => {
 
   // Logout function
   const handleLogout = () => {
-    setLoggedInUser(null); // Clear user session
-    navigate("/login"); // Redirect to login page
+     authService.logout();
+    setLoggedInUser("");
+    navigate("/login");
   };
 
   // Get alert status badge
@@ -78,18 +114,45 @@ const SecurityDashboard = () => {
       case "FAILED_LOGIN":
         return <span className="badge bg-warning text-dark">Warning</span>;
       case "ROLE_CHANGED":
+      case "USER_CREATED":
+      case "MFA_ENABLED":
         return <span className="badge bg-info">Info</span>;
       default:
         return <span className="badge bg-success">Normal</span>;
     }
   };
 
+  // Determine log severity level
+  const getSeverityClass = (type) => {
+    switch (type) {
+      case "SUSPICIOUS_ACTIVITY":
+      case "UNAUTHORIZED_ACCESS":
+        return "table-danger";
+      case "FAILED_LOGIN":
+        return "table-warning";
+      default:
+        return "";
+    }
+  };
+
   // Count incidents by severity
   const criticalCount = logs.filter(log => 
-    log.type === "SUSPICIOUS_ACTIVITY" || log.type === "UNAUTHORIZED_ACCESS").length;
-  const warningCount = logs.filter(log => log.type === "FAILED_LOGIN").length;
-  const infoCount = logs.filter(log => log.type === "ROLE_CHANGED").length;
-  const normalCount = logs.filter(log => log.type === "LOGIN_SUCCESS").length;
+    log.type === "SUSPICIOUS_ACTIVITY" || log.type === "UNAUTHORIZED_ACCESS"
+  ).length;
+  
+  const warningCount = logs.filter(log => 
+    log.type === "FAILED_LOGIN"
+  ).length;
+  
+  const infoCount = logs.filter(log => 
+    log.type === "ROLE_CHANGED" || log.type === "USER_CREATED" || log.type === "MFA_ENABLED"
+  ).length;
+  
+  const normalCount = logs.filter(log => 
+    log.type === "LOGIN_SUCCESS"
+  ).length;
+
+  if ( !loggedInUser || loggedInUser == "") <Navigate to="/login" />
 
   return (
     <div className="container-fluid bg-light" style={{minHeight: "100vh"}}>
@@ -223,6 +286,11 @@ const SecurityDashboard = () => {
                       <small className="text-muted">IP: {log.ip}</small>
                     </div>
                   ))}
+                  {logs.filter(log => log.type === "SUSPICIOUS_ACTIVITY" || log.type === "UNAUTHORIZED_ACCESS").length === 0 && (
+                    <div className="text-center p-3 text-muted">
+                      No critical alerts at this time
+                    </div>
+                  )}
                 </div>
                 <div className="text-center mt-3">
                   <button className="btn btn-primary btn-sm" onClick={addLog}>
@@ -261,13 +329,7 @@ const SecurityDashboard = () => {
                     </thead>
                     <tbody>
                       {logs.map((log) => (
-                        <tr key={log.id} className={
-                          log.type === "SUSPICIOUS_ACTIVITY" || log.type === "UNAUTHORIZED_ACCESS" 
-                            ? "table-danger" 
-                            : log.type === "FAILED_LOGIN" 
-                              ? "table-warning" 
-                              : ""
-                        }>
+                        <tr key={log.id} className={getSeverityClass(log.type)}>
                           <td>{getStatusBadge(log.type)}</td>
                           <td>{log.type}</td>
                           <td>{log.user}</td>
@@ -276,6 +338,11 @@ const SecurityDashboard = () => {
                           <td>{log.timestamp}</td>
                         </tr>
                       ))}
+                      {logs.length === 0 && (
+                        <tr>
+                          <td colSpan="6" className="text-center">Loading logs...</td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
